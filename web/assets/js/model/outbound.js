@@ -579,13 +579,26 @@ class UdpMask extends CommonClass {
             case 'header-dns':
             case 'xdns':
                 return { domain: settings.domain || '' };
+            case 'xicmp':
+                return { listenIp: settings.listenIp || '', id: settings.id ?? 0 };
+            case 'noise':
+                return { reset: settings.reset ?? false, noise: settings.noise || [] };
+            case 'header-custom':
+                return { client: settings.client || [], server: settings.server || [] };
+            case 'sudoku':
+                return {
+                    password: settings.password || '',
+                    ascii: settings.ascii || 'prefer_ascii',
+                    paddingMin: settings.paddingMin ?? 1,
+                    paddingMax: settings.paddingMax ?? 8
+                };
             case 'mkcp-original':
             case 'header-dtls':
             case 'header-srtp':
             case 'header-utp':
             case 'header-wechat':
             case 'header-wireguard':
-                return {}; // No settings needed
+                return {};
             default:
                 return settings;
         }

@@ -53,11 +53,31 @@
                         v-if="['tcp', 'ws', 'httpupgrade', 'xhttp', 'kcp'].includes(inbound.stream.network)"
                         value="xdns">
                         xDNS (Experimental)</a-select-option>
+                    <!-- Salamander for all networks -->
+                    <a-select-option
+                        v-if="['tcp', 'ws', 'httpupgrade', 'xhttp', 'kcp'].includes(inbound.stream.network)"
+                        value="salamander">
+                        Salamander</a-select-option>
+                    <!-- Noise for all networks -->
+                    <a-select-option
+                        v-if="['tcp', 'ws', 'httpupgrade', 'xhttp', 'kcp'].includes(inbound.stream.network)"
+                        value="noise">
+                        Noise</a-select-option>
+                    <!-- Header Custom for all networks -->
+                    <a-select-option
+                        v-if="['tcp', 'ws', 'httpupgrade', 'xhttp', 'kcp'].includes(inbound.stream.network)"
+                        value="header-custom">
+                        Header Custom</a-select-option>
+                    <!-- Sudoku (UDP) for non-kcp networks -->
+                    <a-select-option
+                        v-if="['tcp', 'ws', 'httpupgrade', 'xhttp'].includes(inbound.stream.network)"
+                        value="sudoku">
+                        Sudoku</a-select-option>
                 </a-select>
             </a-form-item>
             <!-- Settings for password-based masks -->
             <a-form-item label='Password'
-                v-if="['mkcp-aes128gcm'].includes(mask.type)">
+                v-if="['mkcp-aes128gcm', 'salamander'].includes(mask.type)">
                 <a-input v-model.trim="mask.settings.password"
                     placeholder="Obfuscation password"></a-input>
             </a-form-item>
@@ -68,9 +88,9 @@
                     placeholder="e.g., www.example.com"></a-input>
             </a-form-item>
             <!-- Settings for xICMP -->
-            <a-form-item label='IP'
+            <a-form-item label='Listen IP'
                 v-if="mask.type === 'xicmp'">
-                <a-input v-model.trim="mask.settings.ip"
+                <a-input v-model.trim="mask.settings.listenIp"
                     placeholder="e.g., 1.1.1.1"></a-input>
             </a-form-item>
             <a-form-item label='ID'
@@ -78,6 +98,56 @@
                 <a-input-number v-model.number="mask.settings.id"
                     :min="0" :max="65535"></a-input-number>
             </a-form-item>
+            <!-- Settings for Noise -->
+            <template v-if="mask.type === 'noise'">
+                <a-form-item label='Reset'>
+                    <a-switch v-model="mask.settings.reset"></a-switch>
+                </a-form-item>
+                <a-form-item label='Noise'>
+                    <a-input type="textarea" :rows="3"
+                        :value="JSON.stringify(mask.settings.noise)"
+                        @change="(e) => { try { mask.settings.noise = JSON.parse(e.target.value); } catch(ex) {} }"
+                        placeholder='[{"type":"rand","packet":"10-20","delay":"10-16"}]'></a-input>
+                </a-form-item>
+            </template>
+            <!-- Settings for Header Custom (UDP) -->
+            <template v-if="mask.type === 'header-custom'">
+                <a-form-item label='Client'>
+                    <a-input type="textarea" :rows="3"
+                        :value="JSON.stringify(mask.settings.client)"
+                        @change="(e) => { try { mask.settings.client = JSON.parse(e.target.value); } catch(ex) {} }"
+                        placeholder='["hex1","hex2"]'></a-input>
+                </a-form-item>
+                <a-form-item label='Server'>
+                    <a-input type="textarea" :rows="3"
+                        :value="JSON.stringify(mask.settings.server)"
+                        @change="(e) => { try { mask.settings.server = JSON.parse(e.target.value); } catch(ex) {} }"
+                        placeholder='["hex1","hex2"]'></a-input>
+                </a-form-item>
+            </template>
+            <!-- Settings for Sudoku (UDP) -->
+            <template v-if="mask.type === 'sudoku'">
+                <a-form-item label='Password'>
+                    <a-input v-model.trim="mask.settings.password"
+                        placeholder="Shared password"></a-input>
+                </a-form-item>
+                <a-form-item label='ASCII Mode'>
+                    <a-select v-model="mask.settings.ascii"
+                        :dropdown-class-name="themeSwitcher.currentTheme">
+                        <a-select-option value="prefer_ascii">prefer_ascii</a-select-option>
+                        <a-select-option value="force_ascii">force_ascii</a-select-option>
+                        <a-select-option value="no_ascii">no_ascii</a-select-option>
+                    </a-select>
+                </a-form-item>
+                <a-form-item label='Padding Min'>
+                    <a-input-number v-model.number="mask.settings.paddingMin"
+                        :min="0"></a-input-number>
+                </a-form-item>
+                <a-form-item label='Padding Max'>
+                    <a-input-number v-model.number="mask.settings.paddingMax"
+                        :min="0"></a-input-number>
+                </a-form-item>
+            </template>
         </a-form>
     </template>
 </a-form>

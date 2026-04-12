@@ -249,6 +249,9 @@ func (s *SubService) genVmessLink(inbound *model.Inbound, email string) string {
 		}
 		obj["mode"] = xhttp["mode"].(string)
 	}
+	for k, v := range extractFinalMaskParams(stream) {
+		obj[k] = v
+	}
 	security, _ := stream["security"].(string)
 	obj["tls"] = security
 	if security == "tls" {
@@ -406,6 +409,9 @@ func (s *SubService) genVlessLink(inbound *model.Inbound, email string) string {
 			params["host"] = searchHost(headers)
 		}
 		params["mode"] = xhttp["mode"].(string)
+	}
+	for k, v := range extractFinalMaskParams(stream) {
+		params[k] = v
 	}
 	security, _ := stream["security"].(string)
 	if security == "tls" {
@@ -602,6 +608,9 @@ func (s *SubService) genTrojanLink(inbound *model.Inbound, email string) string 
 			params["host"] = searchHost(headers)
 		}
 		params["mode"] = xhttp["mode"].(string)
+	}
+	for k, v := range extractFinalMaskParams(stream) {
+		params[k] = v
 	}
 	security, _ := stream["security"].(string)
 	if security == "tls" {
@@ -803,6 +812,10 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 		params["mode"] = xhttp["mode"].(string)
 	}
 
+	for k, v := range extractFinalMaskParams(stream) {
+		params[k] = v
+	}
+
 	security, _ := stream["security"].(string)
 	if security == "tls" {
 		params["security"] = "tls"
@@ -968,6 +981,43 @@ func (s *SubService) genRemark(inbound *model.Inbound, email string, extra strin
 		}
 	}
 	return strings.Join(remark, separationChar)
+}
+
+func extractFinalMaskParams(stream map[string]any) map[string]string {
+	result := make(map[string]string)
+	finalmask, ok := stream["finalmask"].(map[string]any)
+	if !ok {
+		return result
+	}
+	tcpMasks, ok := finalmask["tcp"].([]any)
+	if !ok {
+		return result
+	}
+	for _, item := range tcpMasks {
+		mask, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		maskType, _ := mask["type"].(string)
+		settings, _ := mask["settings"].(map[string]any)
+		if settings == nil {
+			continue
+		}
+		switch maskType {
+		case "fragment":
+			if l, ok := settings["length"].(string); ok && l != "" {
+				result["fragment_length"] = l
+			}
+			if d, ok := settings["delay"].(string); ok && d != "" {
+				result["fragment_delay"] = d
+			}
+		case "sudoku":
+			if p, ok := settings["password"].(string); ok && p != "" {
+				result["sudoku"] = p
+			}
+		}
+	}
+	return result
 }
 
 func searchKey(data any, key string) (any, bool) {

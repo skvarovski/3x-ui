@@ -606,21 +606,63 @@ class UdpMask extends CommonClass {
     }
 }
 
-class FinalMaskStreamSettings extends CommonClass {
-    constructor(udp = []) {
+class TcpMask extends CommonClass {
+    constructor(type = 'fragment', settings = {}) {
         super();
-        this.udp = Array.isArray(udp) ? udp.map(u => new UdpMask(u.type, u.settings)) : [new UdpMask(udp.type, udp.settings)];
+        this.type = type;
+        this.settings = this._getDefaultSettings(type, settings);
+    }
+
+    _getDefaultSettings(type, settings = {}) {
+        switch (type) {
+            case 'fragment':
+                return {
+                    packets: settings.packets || 'tlshello',
+                    length: settings.length || '10-50',
+                    delay: settings.delay || '5-15',
+                    maxSplit: settings.maxSplit ?? 0
+                };
+            case 'sudoku':
+                return {
+                    password: settings.password || '',
+                    ascii: settings.ascii || 'prefer_ascii',
+                    paddingMin: settings.paddingMin ?? 1,
+                    paddingMax: settings.paddingMax ?? 8
+                };
+            default:
+                return settings;
+        }
     }
 
     static fromJson(json = {}) {
-        return new FinalMaskStreamSettings(json.udp || []);
+        return new TcpMask(json.type || 'fragment', json.settings || {});
     }
 
     toJson() {
         return {
-            udp: this.udp.map(udp => udp.toJson())
+            type: this.type,
+            settings: (this.settings && Object.keys(this.settings).length > 0)
+                ? this.settings : undefined
         };
+    }
+}
 
+class FinalMaskStreamSettings extends CommonClass {
+    constructor(udp = [], tcp = []) {
+        super();
+        this.udp = Array.isArray(udp) ? udp.map(u => new UdpMask(u.type, u.settings)) : [new UdpMask(udp.type, udp.settings)];
+        this.tcp = Array.isArray(tcp) ? tcp.map(t => new TcpMask(t.type, t.settings)) : [];
+    }
+
+    static fromJson(json = {}) {
+        return new FinalMaskStreamSettings(json.udp || [], json.tcp || []);
+    }
+
+    toJson() {
+        const result = {};
+        if (this.udp.length > 0) result.udp = this.udp.map(u => u.toJson());
+        if (this.tcp.length > 0) result.tcp = this.tcp.map(t => t.toJson());
+        return result;
     }
 }
 
@@ -666,8 +708,19 @@ class StreamSettings extends CommonClass {
         }
     }
 
+    addTcpMask(type = 'fragment') {
+        this.finalmask.tcp.push(new TcpMask(type));
+    }
+
+    delTcpMask(index) {
+        if (this.finalmask.tcp) {
+            this.finalmask.tcp.splice(index, 1);
+        }
+    }
+
     get hasFinalMask() {
-        return this.finalmask.udp && this.finalmask.udp.length > 0;
+        return (this.finalmask.udp && this.finalmask.udp.length > 0)
+            || (this.finalmask.tcp && this.finalmask.tcp.length > 0);
     }
 
     get isTls() {
@@ -935,6 +988,21 @@ class Outbound extends CommonClass {
                 json.fp);
         }
 
+        const tcpMasks = [];
+        if (json.fragment_length || json.fragment_delay) {
+            tcpMasks.push(new TcpMask('fragment', {
+                packets: 'tlshello',
+                length: json.fragment_length || '10-50',
+                delay: json.fragment_delay || '5-15'
+            }));
+        }
+        if (json.sudoku) {
+            tcpMasks.push(new TcpMask('sudoku', { password: json.sudoku }));
+        }
+        if (tcpMasks.length > 0) {
+            stream.finalmask = new FinalMaskStreamSettings([], tcpMasks);
+        }
+
         const port = json.port * 1;
 
         return new Outbound(json.ps, Protocols.VMess, new Outbound.VmessSettings(json.add, port, json.id, json.scy), stream);
@@ -986,6 +1054,24 @@ class Outbound extends CommonClass {
             let spx = url.searchParams.get('spx') ?? '';
             let pqv = url.searchParams.get('pqv') ?? '';
             stream.reality = new RealityStreamSettings(pbk, fp, sni, sid, spx, pqv);
+        }
+
+        const fragmentLength = url.searchParams.get('fragment_length');
+        const fragmentDelay = url.searchParams.get('fragment_delay');
+        const sudokuPwd = url.searchParams.get('sudoku');
+        const tcpMasks = [];
+        if (fragmentLength || fragmentDelay) {
+            tcpMasks.push(new TcpMask('fragment', {
+                packets: 'tlshello',
+                length: fragmentLength || '10-50',
+                delay: fragmentDelay || '5-15'
+            }));
+        }
+        if (sudokuPwd) {
+            tcpMasks.push(new TcpMask('sudoku', { password: sudokuPwd }));
+        }
+        if (tcpMasks.length > 0) {
+            stream.finalmask = new FinalMaskStreamSettings([], tcpMasks);
         }
 
         const regex = /([^@]+):\/\/([^@]+)@(.+):(\d+)(.*)$/;

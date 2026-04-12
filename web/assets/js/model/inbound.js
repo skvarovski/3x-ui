@@ -1007,21 +1007,63 @@ class UdpMask extends XrayCommonClass {
     }
 }
 
-class FinalMaskStreamSettings extends XrayCommonClass {
-    constructor(udp = []) {
+class TcpMask extends XrayCommonClass {
+    constructor(type = 'fragment', settings = {}) {
         super();
-        this.udp = Array.isArray(udp) ? udp.map(u => new UdpMask(u.type, u.settings)) : [new UdpMask(udp.type, udp.settings)];
+        this.type = type;
+        this.settings = this._getDefaultSettings(type, settings);
+    }
+
+    _getDefaultSettings(type, settings = {}) {
+        switch (type) {
+            case 'fragment':
+                return {
+                    packets: settings.packets || 'tlshello',
+                    length: settings.length || '10-50',
+                    delay: settings.delay || '5-15',
+                    maxSplit: settings.maxSplit ?? 0
+                };
+            case 'sudoku':
+                return {
+                    password: settings.password || '',
+                    ascii: settings.ascii || 'prefer_ascii',
+                    paddingMin: settings.paddingMin ?? 1,
+                    paddingMax: settings.paddingMax ?? 8
+                };
+            default:
+                return settings;
+        }
     }
 
     static fromJson(json = {}) {
-        return new FinalMaskStreamSettings(json.udp || []);
+        return new TcpMask(json.type || 'fragment', json.settings || {});
     }
 
     toJson() {
         return {
-            udp: this.udp.map(udp => udp.toJson())
+            type: this.type,
+            settings: (this.settings && Object.keys(this.settings).length > 0)
+                ? this.settings : undefined
         };
+    }
+}
 
+class FinalMaskStreamSettings extends XrayCommonClass {
+    constructor(udp = [], tcp = []) {
+        super();
+        this.udp = Array.isArray(udp) ? udp.map(u => new UdpMask(u.type, u.settings)) : [new UdpMask(udp.type, udp.settings)];
+        this.tcp = Array.isArray(tcp) ? tcp.map(t => new TcpMask(t.type, t.settings)) : [];
+    }
+
+    static fromJson(json = {}) {
+        return new FinalMaskStreamSettings(json.udp || [], json.tcp || []);
+    }
+
+    toJson() {
+        const result = {};
+        if (this.udp.length > 0) result.udp = this.udp.map(u => u.toJson());
+        if (this.tcp.length > 0) result.tcp = this.tcp.map(t => t.toJson());
+        return result;
     }
 }
 
@@ -1066,8 +1108,19 @@ class StreamSettings extends XrayCommonClass {
         }
     }
 
+    addTcpMask(type = 'fragment') {
+        this.finalmask.tcp.push(new TcpMask(type));
+    }
+
+    delTcpMask(index) {
+        if (this.finalmask.tcp) {
+            this.finalmask.tcp.splice(index, 1);
+        }
+    }
+
     get hasFinalMask() {
-        return this.finalmask.udp && this.finalmask.udp.length > 0;
+        return (this.finalmask.udp && this.finalmask.udp.length > 0)
+            || (this.finalmask.tcp && this.finalmask.tcp.length > 0);
     }
 
     get isTls() {
@@ -1168,6 +1221,21 @@ class Sniffing extends XrayCommonClass {
             json.routeOnly,
         );
     }
+}
+
+function extractFinalMaskParams(finalmask) {
+    const params = {};
+    if (!finalmask?.tcp) return params;
+    for (const mask of finalmask.tcp) {
+        if (mask.type === 'fragment' && mask.settings) {
+            if (mask.settings.length) params.fragment_length = mask.settings.length;
+            if (mask.settings.delay) params.fragment_delay = mask.settings.delay;
+        }
+        if (mask.type === 'sudoku' && mask.settings?.password) {
+            params.sudoku = mask.settings.password;
+        }
+    }
+    return params;
 }
 
 class Inbound extends XrayCommonClass {
@@ -1403,6 +1471,11 @@ class Inbound extends XrayCommonClass {
             obj.type = xhttp.mode;
         }
 
+        const fmParams = extractFinalMaskParams(this.stream.finalmask);
+        for (const [k, v] of Object.entries(fmParams)) {
+            obj[k] = v;
+        }
+
         if (tls === 'tls') {
             if (!ObjectUtil.isEmpty(this.stream.tls.sni)) {
                 obj.sni = this.stream.tls.sni;
@@ -1466,6 +1539,11 @@ class Inbound extends XrayCommonClass {
                 params.set("host", xhttp.host?.length > 0 ? xhttp.host : this.getHeader(xhttp, 'host'));
                 params.set("mode", xhttp.mode);
                 break;
+        }
+
+        const fmParams = extractFinalMaskParams(this.stream.finalmask);
+        for (const [k, v] of Object.entries(fmParams)) {
+            params.set(k, v);
         }
 
         if (security === 'tls') {
@@ -1568,6 +1646,11 @@ class Inbound extends XrayCommonClass {
                 break;
         }
 
+        const fmParams = extractFinalMaskParams(this.stream.finalmask);
+        for (const [k, v] of Object.entries(fmParams)) {
+            params.set(k, v);
+        }
+
         if (security === 'tls') {
             params.set("security", "tls");
             if (this.stream.isTls) {
@@ -1642,6 +1725,11 @@ class Inbound extends XrayCommonClass {
                 params.set("host", xhttp.host?.length > 0 ? xhttp.host : this.getHeader(xhttp, 'host'));
                 params.set("mode", xhttp.mode);
                 break;
+        }
+
+        const fmParams = extractFinalMaskParams(this.stream.finalmask);
+        for (const [k, v] of Object.entries(fmParams)) {
+            params.set(k, v);
         }
 
         if (security === 'tls') {

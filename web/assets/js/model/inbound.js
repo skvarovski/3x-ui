@@ -1030,6 +1030,12 @@ class TcpMask extends XrayCommonClass {
                     paddingMin: settings.paddingMin ?? 1,
                     paddingMax: settings.paddingMax ?? 8
                 };
+            case 'header-custom':
+                return {
+                    clients: settings.clients || [],
+                    servers: settings.servers || [],
+                    errors: settings.errors || []
+                };
             default:
                 return settings;
         }

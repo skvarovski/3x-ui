@@ -257,4 +257,134 @@
     </a-form>
   </template>
 </a-form>
+
+<!-- TCP Masks (skvarovski/3x-ui fork): visible for TCP-based transports.
+     Supported types: fragment (TLS-fingerprint splitting), sudoku (symmetric obfs),
+     header-custom (fake TCP handshake — with one-click presets for RDP/SSH/HTTP/etc). -->
+<a-form
+  :colon="false"
+  :label-col="{ md: {span:8} }"
+  :wrapper-col="{ md: {span:14} }"
+  v-if="['tcp', 'ws', 'grpc', 'xhttp', 'httpupgrade'].includes(inbound.stream.network)"
+>
+  <a-divider :style="{ margin: '5px 0 0' }"></a-divider>
+  <a-form-item label="TCP Masks">
+    <a-button
+      icon="plus"
+      type="primary"
+      size="small"
+      @click="inbound.stream.addTcpMask('fragment')"
+    ></a-button>
+  </a-form-item>
+  <template v-if="inbound.stream.finalmask.tcp && inbound.stream.finalmask.tcp.length > 0">
+    <a-form
+      v-for="(mask, index) in inbound.stream.finalmask.tcp"
+      :key="'tcp-'+index"
+      :colon="false"
+      :label-col="{ md: {span:8} }"
+      :wrapper-col="{ md: {span:14} }"
+    >
+      <a-divider :style="{ margin: '0' }">
+        TCP Mask [[ index + 1 ]]
+        <a-icon
+          type="delete"
+          @click="() => inbound.stream.delTcpMask(index)"
+          :style="{ color: 'rgb(255, 77, 79)', cursor: 'pointer' }"
+        ></a-icon>
+      </a-divider>
+      <a-form-item label='{{ i18n "pages.xray.outbound.type" }}'>
+        <a-select
+          v-model="mask.type"
+          @change="(type) => { mask.settings = mask._getDefaultSettings(type, {}); }"
+          :dropdown-class-name="themeSwitcher.currentTheme"
+        >
+          <a-select-option value="fragment">Fragment (TLS)</a-select-option>
+          <a-select-option value="sudoku">Sudoku</a-select-option>
+          <a-select-option value="header-custom">Header Custom</a-select-option>
+        </a-select>
+      </a-form-item>
+
+      <!-- Fragment -->
+      <template v-if="mask.type === 'fragment'">
+        <a-form-item label="Packets">
+          <a-select v-model="mask.settings.packets" :dropdown-class-name="themeSwitcher.currentTheme">
+            <a-select-option value="tlshello">tlshello</a-select-option>
+            <a-select-option value="1-4">1-4</a-select-option>
+            <a-select-option value="1-5">1-5</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="Length">
+          <a-input v-model.trim="mask.settings.length" placeholder="10-50" />
+        </a-form-item>
+        <a-form-item label="Delay (ms)">
+          <a-input v-model.trim="mask.settings.delay" placeholder="5-15" />
+        </a-form-item>
+        <a-form-item label="Max Split">
+          <a-input-number v-model.number="mask.settings.maxSplit" :min="0" />
+        </a-form-item>
+      </template>
+
+      <!-- Sudoku TCP (symmetric, requires same password client+server) -->
+      <template v-if="mask.type === 'sudoku'">
+        <a-form-item label="Password">
+          <a-input v-model.trim="mask.settings.password" placeholder="Shared password" />
+        </a-form-item>
+        <a-form-item label="ASCII Mode">
+          <a-select v-model="mask.settings.ascii" :dropdown-class-name="themeSwitcher.currentTheme">
+            <a-select-option value="prefer_ascii">prefer_ascii</a-select-option>
+            <a-select-option value="force_ascii">force_ascii</a-select-option>
+            <a-select-option value="no_ascii">no_ascii</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="Padding Min">
+          <a-input-number v-model.number="mask.settings.paddingMin" :min="0" />
+        </a-form-item>
+        <a-form-item label="Padding Max">
+          <a-input-number v-model.number="mask.settings.paddingMax" :min="0" />
+        </a-form-item>
+      </template>
+
+      <!-- Header Custom TCP (2D hex arrays — clients/servers/errors).
+           Pre-set dropdown fills clients/servers with common protocol patterns
+           (RDP/SSH/HTTP/etc) so users don't need to hand-craft hex sequences. -->
+      <template v-if="mask.type === 'header-custom'">
+        <a-form-item label="Preset">
+          <a-select
+            placeholder="Apply a preset…"
+            :dropdown-class-name="themeSwitcher.currentTheme"
+            @change="(key) => { const p = TCP_HEADER_PRESETS[key]; mask.settings.clients = JSON.parse(JSON.stringify(p.clients || [])); mask.settings.servers = JSON.parse(JSON.stringify(p.servers || [])); mask.settings.errors = JSON.parse(JSON.stringify(p.errors || [])); }"
+          >
+            <a-select-option v-for="(p, key) in TCP_HEADER_PRESETS" :key="key" :value="key">
+              [[ p.name ]]
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="Clients">
+          <a-input
+            type="textarea" :rows="3"
+            :value="JSON.stringify(mask.settings.clients)"
+            @change="(e) => { try { mask.settings.clients = JSON.parse(e.target.value); } catch(ex) {} }"
+            placeholder='[["hex1","hex2"],["hex3"]]'
+          />
+        </a-form-item>
+        <a-form-item label="Servers">
+          <a-input
+            type="textarea" :rows="3"
+            :value="JSON.stringify(mask.settings.servers)"
+            @change="(e) => { try { mask.settings.servers = JSON.parse(e.target.value); } catch(ex) {} }"
+            placeholder='[["hex1"]]'
+          />
+        </a-form-item>
+        <a-form-item label="Errors">
+          <a-input
+            type="textarea" :rows="3"
+            :value="JSON.stringify(mask.settings.errors)"
+            @change="(e) => { try { mask.settings.errors = JSON.parse(e.target.value); } catch(ex) {} }"
+            placeholder='[["hex1"]]'
+          />
+        </a-form-item>
+      </template>
+    </a-form>
+  </template>
+</a-form>
 {{end}}

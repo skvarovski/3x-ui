@@ -1111,20 +1111,68 @@ class UdpMask extends XrayCommonClass {
     }
 }
 
-class FinalMaskStreamSettings extends XrayCommonClass {
-    constructor(udp = []) {
+class TcpMask extends XrayCommonClass {
+    constructor(type = 'fragment', settings = {}) {
         super();
-        this.udp = Array.isArray(udp) ? udp.map(u => new UdpMask(u.type, u.settings)) : [new UdpMask(udp.type, udp.settings)];
+        this.type = type;
+        this.settings = this._getDefaultSettings(type, settings);
+    }
+
+    _getDefaultSettings(type, settings = {}) {
+        switch (type) {
+            case 'fragment':
+                return {
+                    packets: settings.packets || 'tlshello',
+                    length: settings.length || '10-50',
+                    delay: settings.delay || '5-15',
+                    maxSplit: settings.maxSplit ?? 0
+                };
+            case 'sudoku':
+                return {
+                    password: settings.password || '',
+                    ascii: settings.ascii || 'prefer_ascii',
+                    paddingMin: settings.paddingMin ?? 1,
+                    paddingMax: settings.paddingMax ?? 8
+                };
+            case 'header-custom':
+                return {
+                    clients: settings.clients || [],
+                    servers: settings.servers || [],
+                    errors: settings.errors || []
+                };
+            default:
+                return settings;
+        }
     }
 
     static fromJson(json = {}) {
-        return new FinalMaskStreamSettings(json.udp || []);
+        return new TcpMask(json.type || 'fragment', json.settings || {});
     }
 
     toJson() {
         return {
-            udp: this.udp.map(udp => udp.toJson())
+            type: this.type,
+            settings: (this.settings && Object.keys(this.settings).length > 0) ? this.settings : undefined
         };
+    }
+}
+
+class FinalMaskStreamSettings extends XrayCommonClass {
+    constructor(udp = [], tcp = []) {
+        super();
+        this.udp = Array.isArray(udp) ? udp.map(u => new UdpMask(u.type, u.settings)) : [new UdpMask(udp.type, udp.settings)];
+        this.tcp = Array.isArray(tcp) ? tcp.map(t => new TcpMask(t.type, t.settings)) : [];
+    }
+
+    static fromJson(json = {}) {
+        return new FinalMaskStreamSettings(json.udp || [], json.tcp || []);
+    }
+
+    toJson() {
+        const result = {};
+        if (this.udp.length > 0) result.udp = this.udp.map(u => u.toJson());
+        if (this.tcp.length > 0) result.tcp = this.tcp.map(t => t.toJson());
+        return result;
     }
 }
 
@@ -1171,8 +1219,19 @@ class StreamSettings extends XrayCommonClass {
         }
     }
 
+    addTcpMask(type = 'fragment') {
+        this.finalmask.tcp.push(new TcpMask(type));
+    }
+
+    delTcpMask(index) {
+        if (this.finalmask.tcp) {
+            this.finalmask.tcp.splice(index, 1);
+        }
+    }
+
     get hasFinalMask() {
-        return this.finalmask.udp && this.finalmask.udp.length > 0;
+        return (this.finalmask.udp && this.finalmask.udp.length > 0)
+            || (this.finalmask.tcp && this.finalmask.tcp.length > 0);
     }
 
     get isTls() {
@@ -1290,6 +1349,210 @@ class Sniffing extends XrayCommonClass {
             domainsExcluded: this.domainsExcluded.length > 0 ? this.domainsExcluded : undefined,
         };
     }
+}
+
+// Common TCP header-custom presets (hex-encoded byte sequences) for one-click setup.
+// Each entry has a human-readable name and arrays of `clients`/`servers`/`errors` —
+// outer array = sequence of messages, inner array = byte sequences (hex strings).
+const TCP_HEADER_PRESETS = {
+    rdp: {
+        name: 'RDP (Remote Desktop)',
+        // X.224 Connection Request / Confirm (typical RDP handshake)
+        clients: [["030000130ee000000000000100080003000000"]],
+        servers: [["030000130ed000001234000100080000000000"]],
+        errors: []
+    },
+    ssh: {
+        name: 'SSH-2.0',
+        // "SSH-2.0-OpenSSH_8.4p1 Debian-5\r\n" — banner exchanged both ways
+        clients: [["5353482d322e302d4f70656e5353485f382e3470312044656269616e2d350d0a"]],
+        servers: [["5353482d322e302d4f70656e5353485f382e34703120446562696616e2d350d0a"]],
+        errors: []
+    },
+    http1: {
+        name: 'HTTP/1.1',
+        // "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n" / "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+        clients: [["474554202f20485454502f312e310d0a486f73743a206578616d706c652e636f6d0d0a0d0a"]],
+        servers: [["485454502f312e3120323030204f4b0d0a436f6e74656e742d4c656e6774683a20300d0a0d0a"]],
+        errors: []
+    },
+    http2: {
+        name: 'HTTP/2 Preface',
+        // "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+        clients: [["505249202a20485454502f322e300d0a0d0a534d0d0a0d0a"]],
+        servers: [],
+        errors: []
+    },
+    tls: {
+        name: 'TLS ClientHello (Chrome-like)',
+        // Generic TLS 1.2 record header: type=Handshake(0x16) + version 0x0303 + length placeholder
+        clients: [["1603010100010000fc0303"]],
+        servers: [["1603030059020000550303"]],
+        errors: []
+    },
+    dns: {
+        name: 'DNS over TCP',
+        // 2-byte length prefix + DNS query header (id=0x1234, RD=1)
+        clients: [["00280001012000010000000000000377777706676f6f676c6503636f6d0000010001"]],
+        servers: [["00380001818000010001000000000377777706676f6f676c6503636f6d0000010001c00c00010001"]],
+        errors: []
+    },
+    smtp: {
+        name: 'SMTP',
+        // Client "EHLO example.com\r\n" / Server "220 mail.example.com ESMTP Postfix\r\n"
+        clients: [["48454c4f206578616d706c652e636f6d0d0a"]],
+        servers: [["323230206d61696c2e6578616d706c652e636f6d2045534d54502050376f73742066697800d0a"]],
+        errors: []
+    },
+    ftp: {
+        name: 'FTP',
+        // Server greeting "220 Welcome to FTP service.\r\n"
+        clients: [["555345522061646d696e0d0a"]],  // "USER admin\r\n"
+        servers: [["32323020576c636f6d6520746f20465450207365727669636520642e0d0a"]],
+        errors: []
+    },
+    imap: {
+        name: 'IMAP',
+        servers: [["2a204f4b20494d415034726576312073657276696365207265616479200d0a"]],  // "* OK IMAP4rev1 service ready\r\n"
+        clients: [["6131204c4f47494e2061646d696e2070617373776f72640d0a"]],  // "a1 LOGIN admin password\r\n"
+        errors: []
+    },
+    pop3: {
+        name: 'POP3',
+        servers: [["2b4f4b20706f7033207365727665722072656164790d0a"]],  // "+OK pop3 server ready\r\n"
+        clients: [["555345522061646d696e0d0a"]],
+        errors: []
+    },
+    mysql: {
+        name: 'MySQL',
+        // Server greeting (handshake v10): protocol 10, version "8.0.30", thread id, salt...
+        servers: [["4a0000000a382e302e333000010000007012345678901234001000ff7f0008000000000000000000000000007890123456789012345600"]],
+        clients: [],
+        errors: []
+    },
+    postgres: {
+        name: 'PostgreSQL',
+        // StartupMessage v3: length(0x00000028) + protocol version 0x00030000 + "user\0postgres\0database\0postgres\0\0"
+        clients: [["0000002800030000757365720070736f73746772657300646174616261736500706f73746772657300"]],
+        servers: [["52000000080000000000"]],  // AuthenticationOk
+        errors: []
+    },
+    redis: {
+        name: 'Redis',
+        clients: [["2a310d0a24340d0a50494e470d0a"]],  // "*1\r\n$4\r\nPING\r\n"
+        servers: [["2b504f4e470d0a"]],  // "+PONG\r\n"
+        errors: []
+    },
+    mongodb: {
+        name: 'MongoDB',
+        // OP_MSG hello/isMaster (simplified header)
+        clients: [["3b00000001000000000000000dd0070000000000000000000000000061646d696e2e24636d6400000000000100000010000000106973497341737472160000010000000000"]],
+        servers: [],
+        errors: []
+    },
+    ldap: {
+        name: 'LDAP',
+        // BindRequest (anonymous): SEQUENCE { msgId=1, BindRequest{ ver=3, name="", auth=simple "" } }
+        clients: [["300c0201016007020103040000800000"]],
+        servers: [["300c02010161070a010004000400"]],
+        errors: []
+    },
+    smb: {
+        name: 'SMB/CIFS',
+        // SMB negotiate: NetBIOS header + SMB header magic 0xff534d42 + negotiate cmd 0x72
+        clients: [["00000054ff534d4272000000001853c8000000000000000000000000ffff77c4000000003100025043204e4554574f524b2050524f4752414d20312e30000200044c414e4d414e312e3000020057696e646f777320666f7220576f726b67726f7570732033"]],
+        servers: [],
+        errors: []
+    },
+    vnc: {
+        name: 'VNC (RFB)',
+        // RFB ProtocolVersion: "RFB 003.008\n"
+        servers: [["52464220303033"  + "2e3030380a"]],
+        clients: [["52464220303033"  + "2e3030380a"]],
+        errors: []
+    },
+    telnet: {
+        name: 'Telnet',
+        // IAC DO/WILL negotiation (echo, suppress-go-ahead)
+        servers: [["fffd01fffd03fffb01fffb03"]],
+        clients: [["fffc01fffe01"]],
+        errors: []
+    },
+    websocket: {
+        name: 'WebSocket Upgrade',
+        // Client Upgrade request, Server 101 Switching Protocols
+        clients: [["474554202f20485454502f312e310d0a486f73743a206578616d706c652e636f6d0d0a557067726164653a20776562736f636b65740d0a436f6e6e656374696f6e3a20557067726164650d0a0d0a"]],
+        servers: [["485454502f312e312031303120537769746368696e672050726f746f636f6c730d0a557067726164653a20776562736f636b65740d0a436f6e6e656374696f6e3a20557067726164650d0a0d0a"]],
+        errors: []
+    },
+    grpc: {
+        name: 'gRPC (HTTP/2)',
+        // HTTP/2 preface + simple SETTINGS frame as gRPC over h2c does
+        clients: [["505249202a20485454502f322e300d0a0d0a534d0d0a0d0a0000000400000000000000040800000000ff000005000000000004000400"]],
+        servers: [["000000040000000000"]],
+        errors: []
+    },
+    amqp: {
+        name: 'AMQP/RabbitMQ',
+        // Protocol header: "AMQP\0\0\x09\x01"
+        clients: [["414d515000000901"]],
+        servers: [["414d515000000901"]],
+        errors: []
+    },
+    mqtt: {
+        name: 'MQTT',
+        // CONNECT packet: type=0x10, length, "MQTT" v4, flags, keepalive
+        clients: [["101000044d51545404020014000475736572"]],
+        servers: [["20020000"]],  // CONNACK
+        errors: []
+    },
+    bittorrent: {
+        name: 'BitTorrent',
+        // 19 + "BitTorrent protocol" + reserved8 + info_hash20 + peer_id20
+        clients: [["13426974546f7272656e742070726f746f636f6c0000000000000000" + "00".repeat(40)]],
+        servers: [["13426974546f7272656e742070726f746f636f6c0000000000000000" + "00".repeat(40)]],
+        errors: []
+    },
+    irc: {
+        name: 'IRC',
+        // "CAP LS 302\r\nNICK user\r\nUSER user 0 * :User\r\n"
+        clients: [["434150204c5320333032 0d0a4e49434b20757365720d0a55534552207573657220302a3a557365720d0a".replace(/ /g,"")]],
+        servers: [["3a7365727665722030303120757365723a2057656c636f6d6520746f206e65740d0a"]],
+        errors: []
+    },
+    kafka: {
+        name: 'Kafka',
+        // ApiVersions request: size + ApiKey=18 + ApiVersion=0 + correlationId + clientId
+        clients: [["0000001000120000000000010005746573740000"]],
+        servers: [],
+        errors: []
+    },
+    modbus: {
+        name: 'Modbus TCP',
+        // MBAP header (txn=1, proto=0, len=6, unit=1) + read holding registers (0x03) addr=0 count=1
+        clients: [["00010000000601030000000a"]],
+        servers: [["000100000005010302aabb"]],
+        errors: []
+    }
+};
+
+// Builds the v2rayNG-compatible `fm` URL parameter — a URL-encoded JSON object
+// containing the full finalmask configuration. Round-trip-safe across clients
+// that support this format. Salamander UDP masks are excluded because Hysteria
+// already exposes them via the `obfs=` URL parameter.
+function extractFmParam(finalmask) {
+    if (!finalmask) return null;
+    const out = {};
+    if (finalmask.tcp && finalmask.tcp.length > 0) {
+        out.tcp = finalmask.tcp.map(t => t.toJson());
+    }
+    if (finalmask.udp && finalmask.udp.length > 0) {
+        const filtered = finalmask.udp
+            .filter(u => u.type !== 'salamander')
+            .map(u => u.toJson());
+        if (filtered.length > 0) out.udp = filtered;
+    }
+    return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
 }
 
 class Inbound extends XrayCommonClass {
@@ -1589,6 +1852,9 @@ class Inbound extends XrayCommonClass {
             Inbound.applyXhttpPaddingToObj(xhttp, obj);
         }
 
+        const fmJson = extractFmParam(this.stream.finalmask);
+        if (fmJson) obj.fm = JSON.parse(fmJson);
+
         if (tls === 'tls') {
             if (!ObjectUtil.isEmpty(this.stream.tls.sni)) {
                 obj.sni = this.stream.tls.sni;
@@ -1654,6 +1920,9 @@ class Inbound extends XrayCommonClass {
                 Inbound.applyXhttpPaddingToParams(xhttp, params);
                 break;
         }
+
+        const fmJson = extractFmParam(this.stream.finalmask);
+        if (fmJson) params.set("fm", fmJson);
 
         if (security === 'tls') {
             params.set("security", "tls");
@@ -1756,6 +2025,9 @@ class Inbound extends XrayCommonClass {
                 break;
         }
 
+        const fmJson = extractFmParam(this.stream.finalmask);
+        if (fmJson) params.set("fm", fmJson);
+
         if (security === 'tls') {
             params.set("security", "tls");
             if (this.stream.isTls) {
@@ -1832,6 +2104,9 @@ class Inbound extends XrayCommonClass {
                 Inbound.applyXhttpPaddingToParams(xhttp, params);
                 break;
         }
+
+        const fmJson = extractFmParam(this.stream.finalmask);
+        if (fmJson) params.set("fm", fmJson);
 
         if (security === 'tls') {
             params.set("security", "tls");

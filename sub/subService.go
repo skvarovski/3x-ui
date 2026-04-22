@@ -266,6 +266,9 @@ func (s *SubService) genVmessLink(inbound *model.Inbound, email string) string {
 			}
 		}
 	}
+	if fm := extractFmParam(stream); fm != "" {
+		obj["fm"] = json.RawMessage(fm)
+	}
 	security, _ := stream["security"].(string)
 	obj["tls"] = security
 	if security == "tls" {
@@ -424,6 +427,9 @@ func (s *SubService) genVlessLink(inbound *model.Inbound, email string) string {
 		}
 		params["mode"], _ = xhttp["mode"].(string)
 		applyXhttpPaddingParams(xhttp, params)
+	}
+	if fm := extractFmParam(stream); fm != "" {
+		params["fm"] = fm
 	}
 	security, _ := stream["security"].(string)
 	if security == "tls" {
@@ -621,6 +627,9 @@ func (s *SubService) genTrojanLink(inbound *model.Inbound, email string) string 
 		}
 		params["mode"], _ = xhttp["mode"].(string)
 		applyXhttpPaddingParams(xhttp, params)
+	}
+	if fm := extractFmParam(stream); fm != "" {
+		params["fm"] = fm
 	}
 	security, _ := stream["security"].(string)
 	if security == "tls" {
@@ -821,6 +830,9 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 		}
 		params["mode"], _ = xhttp["mode"].(string)
 		applyXhttpPaddingParams(xhttp, params)
+	}
+	if fm := extractFmParam(stream); fm != "" {
+		params["fm"] = fm
 	}
 
 	security, _ := stream["security"].(string)
@@ -1172,6 +1184,45 @@ func applyXhttpPaddingParams(xhttp map[string]any, params map[string]string) {
 			params["extra"] = string(b)
 		}
 	}
+}
+
+// extractFmParam serializes streamSettings.finalmask as a v2rayNG-compatible
+// `fm` URL parameter (URL-encoded JSON of {udp, tcp}). The salamander UDP mask
+// is excluded because Hysteria already exposes it through the `obfs=` parameter.
+// Returns an empty string when there is no finalmask data to share.
+func extractFmParam(stream map[string]any) string {
+	finalmask, ok := stream["finalmask"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	out := map[string]any{}
+	if tcp, ok := finalmask["tcp"].([]any); ok && len(tcp) > 0 {
+		out["tcp"] = tcp
+	}
+	if udp, ok := finalmask["udp"].([]any); ok && len(udp) > 0 {
+		filtered := make([]any, 0, len(udp))
+		for _, m := range udp {
+			mm, _ := m.(map[string]any)
+			if mm == nil {
+				continue
+			}
+			if t, _ := mm["type"].(string); t == "salamander" {
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		if len(filtered) > 0 {
+			out["udp"] = filtered
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func searchHost(headers any) string {
